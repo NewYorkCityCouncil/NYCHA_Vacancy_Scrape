@@ -73,10 +73,10 @@ def CreateDevDF(Dev_Num):
 
     return(df)
 
-CreateDevDF('51')
+
 final_df = pd.DataFrame(columns = ['Dev_Number','Dev_Name','Month - Year','Occupied','Move-In/Selected','Non-Dwelling','Vacancies'])
 for dev in devs_df['Dev_Number']:
-    final_df = final_df.concat(CreateDevDF(dev))
+    final_df = pd.concat([final_df, CreateDevDF(dev)], axis=0)
 
 final_df.to_csv("all_dev_data.csv", index=False)
 
