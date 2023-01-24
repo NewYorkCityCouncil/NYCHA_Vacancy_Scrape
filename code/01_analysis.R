@@ -1,5 +1,8 @@
 library(dplyr)
 library(ggplot2)
+library(tidyr)
+library(openxlsx)
+library(plotly)
 
 connor_df <- read.csv("data/input/modified/Vacancy Data.csv")
 original_df <- read.csv("data/output/all_dev_data.csv")
@@ -44,7 +47,10 @@ mod_df <- df %>%
               group_by(Dev_Name,`Month-Year`) %>%
               summarise(total_units = sum(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies))
   ) %>%
-  mutate(perc_Vacancies = Vacancies / total_units * 100)
+  mutate(perc_Occupied = Occupied / total_units * 100,
+         perc_MoveInSelected = `Move-in Selected` / total_units * 100,
+         perc_NonDwelling = `Non-Dwelling` / total_units * 100,
+         perc_Vacancies = Vacancies / total_units * 100)
 
 #ALL_dev_stats <- ALL_dev_stats %>%
 #  left_join(ALL_dev_stats %>%
@@ -71,7 +77,7 @@ boro_df <- mod_df %>%
 
 #write.csv(boro_df,"data/output/dev_stats_by_boro.csv",row.names = F)
 
-ggplot(data = boro_df %>%
+p <- ggplot(data = boro_df %>%
          filter(BORO != ""),
        aes(x = `Month-Year`,
            y = total_boro_perc_vacancies,
@@ -92,8 +98,12 @@ ggplot(data = boro_df %>%
   ggtitle("Vacancies by BORO") +
   ylab("Average Vacancy Percentage (%)") +
   scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  theme_bw()
-
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+png("visuals/ByBoro.png",
+    width = 550)
+print(p)
+dev.off()
 
 # PACT Status
 PACT_df <- mod_df %>%
@@ -110,7 +120,7 @@ PACT_df <- mod_df %>%
 
 #write.csv(PACT_df,"data/output/dev_stats_by_PACT.csv",row.names = F)
 
-ggplot(data = PACT_df,
+p <- ggplot(data = PACT_df,
        aes(x = `Month-Year`,
            y = total_PACT_perc_vacancies,
            color = PACT_Project,
@@ -127,7 +137,13 @@ ggplot(data = PACT_df,
   ggtitle("Vacancies by PACT Status") +
   ylab("Average Vacancy Percentage (%)") +
   scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust=1))
+
+png("visuals/byPACT.png",
+    width = 550)
+print(p)
+dev.off()
 
 # Council District
 CD_mod_df <- mod_df %>%
@@ -170,3 +186,59 @@ ggplot(data = CD_df,
   scale_y_continuous(labels = scales::percent_format(scale = 1)) +
   theme_bw() +
   facet_wrap(.~BORO)
+
+# List of developments for CDs: 8, 10, 14, 17, 26, 33, 36, 38, 41, 42
+CDoi <- c(8, 10, 14, 17, 26, 33, 36, 38, 41, 42)
+
+CD_dev_list <- lapply(CDoi, function(x){
+  CD_mod_df %>%
+    filter(new_CD == x) %>%
+    pivot_wider(id_cols = c(Dev_Number,Dev_Name), 
+                names_from = `Month-Year`, 
+                #values_from = c(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies,perc_Occupied,perc_MoveInSelected,perc_NonDwelling,perc_Vacancies),
+                values_from = c(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies),
+                names_glue = "{`Month-Year`}_{.value}")
+})
+
+names(CD_dev_list) <- paste("Council District",CDoi)
+
+#write.xlsx(CD_dev_list,"data/output/CD_Developments.xlsx")
+
+# Look for outliers in changes
+mod_diff_df <- mod_df %>%
+  filter(BORO != "") %>%
+  group_by(Dev_Name) %>%
+  mutate(occupied_diff = perc_Occupied - lag(perc_Occupied),
+         vacancies_diff = perc_Vacancies - lag(perc_Vacancies))
+
+plot_ly(data = mod_diff_df,
+        y = ~vacancies_diff,
+        type = "box")
+
+# Get dev names with >=3% change with >=100 total units
+dev_oi <- mod_diff_df %>% 
+  filter(vacancies_diff >= 3, total_units >= 100) %>% 
+  slice(1:10) %>%
+  pull(Dev_Name)
+
+for(dev in unique(dev_oi)){
+  png(file=paste0("visuals/specific_dev_plots/",dev,".png"),
+      width = 550)
+  p <- ggplot(data = mod_df %>%
+           filter(Dev_Name == dev),
+         aes(x = `Month-Year`,
+             y = perc_Vacancies,
+             group = 1)) +
+    geom_line() +
+    geom_point() +
+    ggtitle(paste0("Vacancies in ",dev," (Total Units: ",last(mod_df %>%
+                                             filter(Dev_Name == dev) %>%
+                                             pull(total_units)), ")")) +
+    ylab("Vacancy Percentage (%)") +
+    scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust=1))
+  print(p)
+  dev.off()
+}
+
