@@ -1,55 +1,28 @@
-# project_template
-a template repository for future github projects
+# NYCHA Vacancy
+Data analysis and visuals for NYCC 1.31.23 ['Oversight – Examining Causes of Vacancies In New York City Housing Authority Properties'](https://legistar.council.nyc.gov/MeetingDetail.aspx?ID=1075729&GUID=5CFEE992-007B-4AC7-BD8D-BCADBEF26A08&Options=info|&Search=) hearing.
 
-
-## Basic Repo Structure Overview
+An associated webpage for this analysis can be found [on the council website](https://council.nyc.gov/data/nycha-vacancy/).
 
 ***
 
-## Readme Example
+#### Data Sources
+The data used was scrapped from ['New York City Housing Authority - NYCHA Metrics'](https://eapps.nycha.info/NychaMetrics/Charts/PublicHousingChartsTabs/?section=public_housing&tab=tab_vacancies#tab_vacancies) using Python and Selenium. The code can be found at ['code/NYCHA_selenium.py'](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape/blob/main/code/NYCHA_selenium.py_) and the csv file from the scrape can be found at ['data/output/all_dev_data.csv'](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape/blob/main/data/output/all_dev_data.csv).
 
-
-
-### Analyzing Storefront Vacancies
-Data analysis and visuals for NYCC 6.9.22 ['Oversight - Combatting Commercial Vacancies'](https://legistar.council.nyc.gov/MeetingDetail.aspx?From=Alert&ID=980028&GUID=239563C5-9CA2-44A7-8E1D-A970A0556192) hearing.
-
-An associated webpage for this analysis can be found [on the council website](https://council.nyc.gov/data/vacant-storefronts/): 
-
-***  
-
-#### Data Sources 
-- [Storefronts Reported Vacant or Not (Filing Year 2020 - 2021)](https://data.cityofnewyork.us/City-Government/Storefronts-Reported-Vacant-or-Not-Filing-Year-202/92iy-9c3n)
-
-- 2019 5-Year ACS Survey: *We used R package censusapi to get demographic data
 
 #### Methodology 
 
 ##### Summary & Intention
-New York City can be a challenging place for small businesses to operate. In addition to adhering to occasionally complex regulatory schemes enforced by multiple City agencies, business owners confront hurdles including rising rents, taxation, competition from chain stores and e-commerce retailers, and various zoning restrictions. Over the course of the last year, a slew of beloved local establishments across the city closed amid skyrocketing costs.
+The need for housing in New York City is ever present. The intense and unending demand for a NYCHA apartment makes it imperative that NYCHA quickly and efficiently place prospective tenants into vacant apartments. This has the dual result of housing a family in need and returning the apartment to the rent rolls. As NYCHA deals with an ongoing funding crisis, the need to keep vacancies as low as possible is vital.
 
-Local Law 157 of 2019 seeks to gather data about the state of vacant storefronts to conduct the sort of studies needed to understand the full scope of storefront vacancy in New York City. The bill requires the department of finance to collect data and establish a public dataset of commercial properties in the City.
+The data team analyzed NYCHA's vacancy rates to:
 
-The data team analyzed local law 57 data in order to:
-- Assess the severity of the problem 
-- Identify vacant storefront hotspots 
-- Release recommendations for better reporting
+- Assess the severity of the problem
+
+- Validate NYCHA's claims
 
 #### Main Takeaways
-Through an analysis of this data, the New York City Council Data Team has investigated hotspots of storefront vacancies and potential economic correlations:
+- In the last year, there has been a marked uptick in vacant apartments and accordingly an increase in the average turnaround days to re-occupy vacant apartments. Overall growth in the total unoccupied apartments from 4,213 (December 2021) to 7,047 (December 2022) with the largest increase coming from the growth in vacant apartments from 490 to over 3,300.
 
-- Overall, the highest vacancy rates are found in the lower and midtown Manhattan and downtown Brooklyn business areas. These are also the areas that received that most COVID-19 grants and loans.
-- At the neighborhood level, West Brighton, Stuyvesant Town-Cooper Village, Turtle Bay-East Midtown and Brooklyn Heights-Cobble Hill have the highest vacancies. 
-- At a more granular level, census tracts with the higher vacancy rates have, on average, 216 storefronts per census tract and are mostly located in lower Manhattan.
-- While the vacancy rate hovers around 12% for most census tracts, those with lower income residents are more likely to have very high vacancy rates (above 20% vacancy).
-- Improving current reporting of Local Law 157 of 2019 is important to fully understand the issue. Recommendations are provided below.
+- There were a few standout developments that had markedly large increases in their vacancy rate. The most notable one is the BRONX RIVER ADDITION development, where it went from 1.3% in September 2021, to close to 25% in December 2022.
 
-#### Recommendations
-Certain changes could be made by the Department of Finance to improve the overall usability of the data set. Those changes include:
-
-- Adding a column for the date and specifically the year of the data collected
-- Streamlining the multiple datasets for each year into one dataset to allow for easy integration in live updating tools/maps/charts and more accessibility to citizen data scientists
-- Reduce geocode null values
-- Require class 1 properties to update their status as of 6/30 or date sold if earlier than 6/30
-- Require owners to report the primary business activity of the last business that leased the storefront
-
-#### Scripts
+- Of the 3,000 vacancies at the end of 2022, only 390 of them were in developments currently in the RAD/PACT pipeline. Their vacancy trend follows the rest of the other non-RAD/PACT developments closely.
