@@ -6,7 +6,7 @@ An associated webpage for this analysis can be found [on the council website](ht
 ***
 
 #### Data Sources
-The data used was scrapped from ['New York City Housing Authority - NYCHA Metrics'](https://eapps.nycha.info/NychaMetrics/Charts/PublicHousingChartsTabs/?section=public_housing&tab=tab_vacancies#tab_vacancies) using Python and Selenium. The code can be found at ['code/NYCHA_selenium.py'](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape/blob/main/code/NYCHA_selenium.py_) and the csv file from the scrape can be found at ['data/output/all_dev_data.csv'](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape/blob/main/data/output/all_dev_data.csv).
+The data used was scraped from ['New York City Housing Authority - NYCHA Metrics'](https://eapps.nycha.info/NychaMetrics/Charts/PublicHousingChartsTabs/?section=public_housing&tab=tab_vacancies#tab_vacancies) using Python and Selenium. The code can be found at ['code/NYCHA_selenium.py'](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape/blob/main/code/NYCHA_selenium.py_) and the csv file from the scrape can be found at ['data/output/all_dev_data.csv'](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape/blob/main/data/output/all_dev_data.csv).
 
 
 #### Methodology 
@@ -21,8 +21,8 @@ The data team analyzed NYCHA's vacancy rates to:
 - Validate NYCHA's claims
 
 #### Main Takeaways
-- In the last year, there has been a marked uptick in vacant apartments and accordingly an increase in the average turnaround days to re-occupy vacant apartments. Overall growth in the total unoccupied apartments from 4,213 (December 2021) to 7,047 (December 2022) with the largest increase coming from the growth in vacant apartments from 490 to over 3,300.
+- In the last year, there has been a marked uptick in the number of vacant apartments as well as an increase in the average number of days it takes NYCHA to re-occupy vacant apartments. Overall growth in the total unoccupied apartments went from 4,213 (December 2021) to 7,047 (December 2022) with the largest increase coming from the growth in vacant apartments from 490 to over 3,300.
 
-- There were a few standout developments that had markedly large increases in their vacancy rate. The most notable one is the BRONX RIVER ADDITION development, where it went from 1.3% in September 2021, to close to 25% in December 2022.
+- There were a few standout developments that had markedly large increases in their vacancy rate. The most notable one is the BRONX RIVER ADDITION development, where the rate grew from 1.3% in September 2021 to nearly 25% in December 2022.
 
-- Of the 3,000 vacancies at the end of 2022, only 390 of them were in developments currently in the RAD/PACT pipeline. Their vacancy trend follows the rest of the other non-RAD/PACT developments closely.
+- Of the 3,000 vacancies remaining at the end of 2022, only 390 of them were in developments currently in the RAD/PACT pipeline. Their vacancy trend follows the non-RAD/PACT developments closely.
