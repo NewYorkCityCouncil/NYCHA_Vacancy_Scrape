@@ -1,244 +1,373 @@
 library(dplyr)
 library(ggplot2)
-library(tidyr)
-library(openxlsx)
 library(plotly)
+library(tidyr)
+library(stringr)
 
+# --- Load data ---
 connor_df <- read.csv("data/input/modified/Vacancy Data.csv")
-original_df <- read.csv("data/output/all_dev_data.csv")
+raw_df    <- read.csv("data/output/all_dev_data_(pulled_2026-04-07).csv")
 
-# Use connor's modified csv to modify our original csv
-df <- original_df %>%
-  left_join(connor_df %>%
-              select(X,`X.2`,`X.5`,`X.6`),
-            by = c("Dev_Name" = "X.2")) %>%
-  rename("PACT_Project" = "X",
-         "BORO" = "X.5",
-         "CD" = "X.6",
-         "Month-Year" = `Month...Year`,
-         "Move-in Selected" = `Move.In.Selected`,
-         "Non-Dwelling" = `Non.Dwelling`) %>%
-  mutate(PACT_Project = case_when(
-    is.na(PACT_Project) | PACT_Project == "" ~ "N",
-    TRUE ~ "Y"
-  ),
-  `Month-Year` = factor(`Month-Year`,
-                        levels = c("Nov-2021","Dec-2021","Jan-2022","Feb-2022","Mar-2022","Apr-2022","May-2022",
-                                   "Jun-2022","Jul-2022","Aug-2022","Sep-2022","Oct-2022","Nov-2022","Dec-2022")))
+# Join BORO, CD, PACT metadata from wide input file
+df <- raw_df |>
+  left_join(
+    connor_df |> select(X, X.2, X.5, X.6),
+    by = c("Dev_Name" = "X.2")
+  ) |>
+  rename(
+    pact        = X,
+    boro        = X.5,
+    cd          = X.6,
+    month       = Month...Year,
+    move_in     = Move.In.Selected,
+    nondwelling = Non.Dwelling
+  ) |>
+  mutate(
+    pact = case_when(is.na(pact) | pact == "" ~ "N", TRUE ~ "Y"),
+    boro = ifelse(Dev_Name == "All", "ALL", boro),
+    cd   = ifelse(Dev_Name == "All", "ALL", cd),
+    pact = ifelse(Dev_Name == "All", "ALL", pact)
+  )
 
-# Remove ALL developments and place it in separate variable
-#ALL_dev_stats <- df %>%
-#  filter(Dev_Name == "All")
-#
-#df <- df %>%
-#  filter(Dev_Name != "All")
+# Chronological month factor
+month_levels <- unique(df$month)
+month_levels <- month_levels[order(as.Date(paste0("01-", month_levels), format = "%d-%b-%Y"))]
+df$month <- factor(df$month, levels = month_levels)
 
-df <- df %>%
-  mutate(BORO = ifelse(Dev_Name == "All", "ALL",BORO),
-         CD = ifelse(Dev_Name == "All", "ALL",CD),
-         PACT_Project = ifelse(Dev_Name == "All", "ALL",PACT_Project))
+# Per-development per-month totals and percentages
+mod_df <- df |>
+  left_join(
+    df |>
+      group_by(Dev_Name, month) |>
+      summarise(total = sum(Occupied, move_in, nondwelling, Vacancies), .groups = "drop"),
+    by = c("Dev_Name", "month")
+  ) |>
+  mutate(
+    pct_occupied    = Occupied    / total * 100,
+    pct_move_in     = move_in     / total * 100,
+    pct_nondwelling = nondwelling / total * 100,
+    pct_vacancies   = Vacancies   / total * 100
+  )
 
-# Clean up unused dfs
-rm(connor_df,original_df)
+# Borough aggregation (exclude unmatched rows)
+boro_df <- mod_df |>
+  filter(!is.na(boro), boro != "") |>
+  group_by(boro, month) |>
+  summarise(
+    units       = sum(total),
+    vacancies   = sum(Vacancies),
+    nondwelling = sum(nondwelling),
+    pct_vac     = vacancies   / units * 100,
+    pct_nd      = nondwelling / units * 100,
+    .groups     = "drop"
+  )
 
-# Create total variable per month and percentage variables
-mod_df <- df %>%
-  left_join(df %>%
-              group_by(Dev_Name,`Month-Year`) %>%
-              summarise(total_units = sum(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies))
-  ) %>%
-  mutate(perc_Occupied = Occupied / total_units * 100,
-         perc_MoveInSelected = `Move-in Selected` / total_units * 100,
-         perc_NonDwelling = `Non-Dwelling` / total_units * 100,
-         perc_Vacancies = Vacancies / total_units * 100)
+# Council district aggregation (split multi-CD developments)
+cd_base <- mod_df |> filter(!is.na(cd), cd != "", cd != "ALL")
 
-#ALL_dev_stats <- ALL_dev_stats %>%
-#  left_join(ALL_dev_stats %>%
-#              group_by(`Month-Year`) %>%
-#              summarise(total_units = sum(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies))
-#  ) %>%
-#  mutate(perc_Vacancies = Vacancies / total_units * 100)
+cd_mod_df <- cd_base |>
+  rowwise() |>
+  mutate(new_cd = str_remove(strsplit(cd, ", ")[[1]][1], "^0+")) |>
+  ungroup() |>
+  bind_rows(
+    cd_base |>
+      filter(sapply(cd, function(x) length(strsplit(x, ", ")[[1]]) >= 2)) |>
+      rowwise() |>
+      mutate(new_cd = str_remove(strsplit(cd, ", ")[[1]][2], "^0+")) |>
+      ungroup()
+  ) |>
+  bind_rows(
+    cd_base |>
+      filter(sapply(cd, function(x) length(strsplit(x, ", ")[[1]]) >= 3)) |>
+      rowwise() |>
+      mutate(new_cd = strsplit(cd, ", ")[[1]][3]) |>
+      ungroup()
+  )
+
+cd_df <- cd_mod_df |>
+  group_by(new_cd, month) |>
+  summarise(
+    units       = sum(total),
+    vacancies   = sum(Vacancies),
+    nondwelling = sum(nondwelling),
+    pct_vac     = vacancies / units * 100,
+    boro        = first(boro),
+    .groups     = "drop"
+  ) |>
+  filter(!is.na(new_cd), new_cd != "")
+
+# Notable developments: >=3pp vacancy increase in a single month, >=100 units
+diff_df <- mod_df |>
+  filter(!is.na(boro), boro != "", boro != "ALL", Dev_Name != "All") |>
+  group_by(Dev_Name) |>
+  arrange(month, .by_group = TRUE) |>
+  mutate(vac_diff = pct_vacancies - lag(pct_vacancies)) |>
+  ungroup()
+
+notable_devs <- diff_df |>
+  filter(vac_diff >= 3, total >= 100) |>
+  distinct(Dev_Name) |>
+  pull(Dev_Name)
+
+# Shared color palette (colorblind-friendly)
+boro_colors <- c(
+  "ALL"           = "#6c757d",
+  "BRONX"         = "#3A0CA3",
+  "BROOKLYN"      = "#4361EE",
+  "MANHATTAN"     = "#F72585",
+  "QUEENS"        = "#2D6A4F",
+  "STATEN ISLAND" = "#F4A261"
+)
+
+# Shared plotly layout helper
+plotly_theme <- function(p) {
+  p |>
+    layout(
+      font   = list(family = "sans-serif", size = 12),
+      margin = list(t = 40, b = 80, l = 60, r = 20),
+      legend = list(orientation = "h", x = 0, y = -0.2,
+                    bgcolor = "rgba(255,255,255,0.8)")
+    ) |>
+    config(displayModeBar = FALSE)
+}
 
 ######
 # SUMMARIZED STATS
 ######
-# BORO
-boro_df <- mod_df %>%
-  group_by(BORO,`Month-Year`) %>%
-  summarise(total_boro_units = sum(total_units),
-            total_boro_occupied = sum(Occupied),
-            total_boro_move_in = sum(`Move-in Selected`),
-            total_boro_nondwelling = sum(`Non-Dwelling`),
-            total_boro_vacancies = sum(Vacancies),
-            total_boro_perc_occupied = total_boro_occupied/total_boro_units * 100,
-            total_boro_perc_move_in = total_boro_move_in/total_boro_units * 100,
-            total_boro_perc_nondwelling = total_boro_nondwelling/total_boro_units * 100,
-            total_boro_perc_vacancies = total_boro_vacancies/total_boro_units * 100)
+# all-vacancies
+all_df <- mod_df |>
+  filter(Dev_Name == "All") |>
+  select(month, Vacancies, move_in, nondwelling) |>
+  pivot_longer(
+    cols      = c(Vacancies, move_in, nondwelling),
+    names_to  = "category",
+    values_to = "units"
+  ) |>
+  mutate(
+    category = recode(category,
+                      Vacancies   = "Vacant",
+                      move_in     = "Move-In / Selected",
+                      nondwelling = "Non-Dwelling"
+    ),
+    category = factor(category,
+                      levels = c("Vacant", "Move-In / Selected", "Non-Dwelling")
+    ),
+    tooltip = paste0(
+      "<b>", category, "</b><br>",
+      month, "<br>",
+      "Units: <b>", format(units, big.mark = ","), "</b>"
+    )
+  )
 
-#write.csv(boro_df,"data/output/dev_stats_by_boro.csv",row.names = F)
+cat_colors <- c(
+  "Vacant"             = "#2F56A6",
+  "Move-In / Selected" = "#F4A261",
+  "Non-Dwelling"       = "#6c757d"
+)
 
-p <- ggplot(data = boro_df %>%
-         filter(BORO != ""),
-       aes(x = `Month-Year`,
-           y = total_boro_perc_vacancies,
-           color = BORO,
-           linetype = BORO,
-           group = BORO,
-           size = BORO)) +
-  geom_line() +
-  geom_point() +
-  scale_color_manual(values = c(ALL = "black",
-                                BRONX = '#211183',
-                                BROOKLYN = '#1d5fd6',
-                                MANHATTAN = "#d6593f",
-                                QUEENS = '#002e14',
-                                `STATEN ISLAND` = '#9d9dff')) +
-  scale_linetype_manual(values = c(2,1,1,1,1,1)) +
-  scale_size_manual(values = c(1.25,0.5,0.5,0.5,0.5,0.5)) +
-  ggtitle("Vacancies by BORO") +
-  ylab("Average Vacancy Percentage (%)") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust=1))
-png("visuals/ByBoro.png",
-    width = 550)
-print(p)
-dev.off()
+p <- ggplot(all_df, aes(
+  x = month, y = units,
+  color = category, group = category,
+  text = tooltip
+)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  scale_color_manual(name = NULL, values = cat_colors) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = NULL, y = "Units",
+       title = "Vacancy Trends (Feb 2025 – Feb 2026)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(face = "bold", size = 13),
+    legend.position  = "bottom"
+  )
 
-# PACT Status
-PACT_df <- mod_df %>%
-  group_by(PACT_Project,`Month-Year`) %>%
-  summarise(total_PACT_units = sum(total_units),
-            total_PACT_occupied = sum(Occupied),
-            total_PACT_move_in = sum(`Move-in Selected`),
-            total_PACT_nondwelling = sum(`Non-Dwelling`),
-            total_PACT_vacancies = sum(Vacancies),
-            total_PACT_perc_occupied = total_PACT_occupied/total_PACT_units * 100,
-            total_PACT_perc_move_in = total_PACT_move_in/total_PACT_units * 100,
-            total_PACT_perc_nondwelling = total_PACT_nondwelling/total_PACT_units * 100,
-            total_PACT_perc_vacancies = total_PACT_vacancies/total_units * 100)
+ggplotly(p, tooltip = "text") |> plotly_theme()
 
-#write.csv(PACT_df,"data/output/dev_stats_by_PACT.csv",row.names = F)
+# boro-vacancy
+p <- boro_df |>
+  filter(boro != "ALL") |>
+  mutate(tooltip = paste0(
+    "<b>", boro, "</b><br>",
+    month, "<br>",
+    "Vacancy Rate: <b>", round(pct_vac, 2), "%</b><br>",
+    "Vacant Units: ", format(vacancies, big.mark = ",")
+  )) |>
+  ggplot(aes(
+    x = month, y = pct_vac,
+    color = boro, group = boro,
+    text = tooltip
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.5) +
+  scale_color_manual(name = "Borough", values = boro_colors) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, NA)) +
+  labs(x = NULL, y = "Vacancy Rate (%)",
+       title = "Vacancy Rate by Borough (Feb 2025 – Feb 2026)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(face = "bold", size = 13),
+    legend.position  = "bottom"
+  )
 
-p <- ggplot(data = PACT_df,
-       aes(x = `Month-Year`,
-           y = total_PACT_perc_vacancies,
-           color = PACT_Project,
-           linetype = PACT_Project,
-           group = PACT_Project,
-           size = PACT_Project)) +
-  geom_line() +
-  geom_point() +
-  scale_color_manual(values = c(ALL = "black",
-                                Y = '#211183',
-                                N = '#1d5fd6')) +
-  scale_linetype_manual(values = c(2,1,1)) +
-  scale_size_manual(values = c(1.25,0.5,0.5)) +
-  ggtitle("Vacancies by PACT Status") +
-  ylab("Average Vacancy Percentage (%)") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 45, hjust=1))
+ggplotly(p, tooltip = "text") |> plotly_theme()
 
-png("visuals/byPACT.png",
-    width = 550)
-print(p)
-dev.off()
+# boro-nondwelling
+nd_plot_df <- boro_df |>
+  mutate(
+    label   = ifelse(boro == "ALL", "All City", boro),
+    tooltip = paste0(
+      "<b>", ifelse(boro == "ALL", "All City", boro), "</b><br>",
+      month, "<br>",
+      "Non-Dwelling Rate: <b>", round(pct_nd, 2), "%</b><br>",
+      "Non-Dwelling Units: ", format(nondwelling, big.mark = ",")
+    )
+  )
 
-# Council District
-CD_mod_df <- mod_df %>%
-  rowwise() %>%
-  mutate(new_CD = stringr::str_remove(strsplit(CD,", ")[[1]][1],"^0+")) %>%
-  bind_rows(mod_df %>%
-              slice(which(sapply(mod_df$CD,function(x) length(strsplit(x, ", ")[[1]]) >= 2))) %>%
-              rowwise() %>%
-              mutate(new_CD = stringr::str_remove(strsplit(CD,", ")[[1]][2],"^0+"))) %>%
-  bind_rows(mod_df %>%
-              slice(which(sapply(mod_df$CD,function(x) length(strsplit(x, ", ")[[1]]) >= 3))) %>%
-              rowwise() %>%
-              mutate(new_CD = strsplit(CD,", ")[[1]][3]))
+# cd-vacancy
+boros_keep <- c("BRONX","BROOKLYN","MANHATTAN","QUEENS","STATEN ISLAND")
 
-CD_df <- CD_mod_df %>%
-  group_by(new_CD,`Month-Year`) %>%
-  summarise(total_CD_units = sum(total_units),
-            total_CD_occupied = sum(Occupied),
-            total_CD_move_in = sum(`Move-in Selected`),
-            total_CD_nondwelling = sum(`Non-Dwelling`),
-            total_CD_vacancies = sum(Vacancies),
-            total_CD_perc_occupied = total_CD_occupied/total_CD_units * 100,
-            total_CD_perc_move_in = total_CD_move_in/total_CD_units * 100,
-            total_CD_perc_nondwelling = total_CD_nondwelling/total_CD_units * 100,
-            total_CD_perc_vacancies = total_CD_vacancies/total_CD_units * 100,
-            BORO = first(BORO)) %>%
-  filter(new_CD != "")
+# Notable = any consecutive month-to-month change >= 3pp
+cd_change <- cd_df |>
+  filter(boro %in% boros_keep) |>
+  group_by(new_cd) |>
+  arrange(month) |>
+  summarise(max_change = max(abs(diff(pct_vac)), na.rm = TRUE), .groups = "drop")
 
-#write.csv(CD_df,"data/output/dev_stats_by_CD.csv",row.names = F)
+notable_cds <- cd_change |> filter(max_change >= 3) |> pull(new_cd)
 
-ggplot(data = CD_df,
-       aes(x = `Month-Year`,
-           y = total_CD_perc_vacancies,
-           color = new_CD,
-           group = new_CD)) +
-  geom_line() +
-  geom_point() +
-  ggtitle("Vacancies by Council District") +
-  ylab("Average Vacancy Percentage (%)") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  theme_bw() +
-  facet_wrap(.~BORO)
+cd_plot_df <- cd_df |>
+  filter(boro %in% boros_keep) |>
+  left_join(cd_change, by = "new_cd") |>
+  mutate(notable = new_cd %in% notable_cds)
 
-# List of developments for CDs: 8, 10, 14, 17, 26, 33, 36, 38, 41, 42
-CDoi <- c(8, 10, 14, 17, 26, 33, 36, 38, 41, 42)
+cd_list <- cd_plot_df |>
+  distinct(new_cd, boro, notable, max_change) |>
+  arrange(boro, new_cd)
 
-CD_dev_list <- lapply(CDoi, function(x){
-  CD_mod_df %>%
-    filter(new_CD == x) %>%
-    pivot_wider(id_cols = c(Dev_Number,Dev_Name), 
-                names_from = `Month-Year`, 
-                #values_from = c(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies,perc_Occupied,perc_MoveInSelected,perc_NonDwelling,perc_Vacancies),
-                values_from = c(Occupied,`Move-in Selected`,`Non-Dwelling`,Vacancies),
-                names_glue = "{`Month-Year`}_{.value}")
-})
+# Precompute per-trace color vectors for both button states
+boro_col_per_trace <- unname(boro_colors[cd_list$boro])
 
-names(CD_dev_list) <- paste("Council District",CDoi)
+all_colors     <- as.list(boro_col_per_trace)
+all_opacities  <- as.list(rep(1, nrow(cd_list)))
 
-#write.xlsx(CD_dev_list,"data/output/CD_Developments.xlsx")
+dim_colors     <- as.list(ifelse(cd_list$notable, boro_col_per_trace, "#cccccc"))
+dim_opacities  <- as.list(ifelse(cd_list$notable, 1, 0.1))
 
-# Look for outliers in changes
-mod_diff_df <- mod_df %>%
-  filter(BORO != "") %>%
-  group_by(Dev_Name) %>%
-  mutate(occupied_diff = perc_Occupied - lag(perc_Occupied),
-         vacancies_diff = perc_Vacancies - lag(perc_Vacancies))
+fig <- plot_ly()
 
-plot_ly(data = mod_diff_df,
-        y = ~vacancies_diff,
-        type = "box")
-
-# Get dev names with >=3% change with >=100 total units
-dev_oi <- mod_diff_df %>% 
-  filter(vacancies_diff >= 3, total_units >= 100) %>% 
-  slice(1:10) %>%
-  pull(Dev_Name)
-
-for(dev in unique(dev_oi)){
-  png(file=paste0("visuals/specific_dev_plots/",dev,".png"),
-      width = 550)
-  p <- ggplot(data = mod_df %>%
-           filter(Dev_Name == dev),
-         aes(x = `Month-Year`,
-             y = perc_Vacancies,
-             group = 1)) +
-    geom_line() +
-    geom_point() +
-    ggtitle(paste0("Vacancies in ",dev," (Total Units: ",last(mod_df %>%
-                                             filter(Dev_Name == dev) %>%
-                                             pull(total_units)), ")")) +
-    ylab("Vacancy Percentage (%)") +
-    scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-    theme_bw() +
-    theme(axis.text.x = element_text(angle = 45, hjust=1))
-  print(p)
-  dev.off()
+for (i in seq_len(nrow(cd_list))) {
+  cd_i  <- cd_list$new_cd[i]
+  col_i <- boro_col_per_trace[i]
+  df_i  <- cd_plot_df |> filter(new_cd == cd_i) |> arrange(month)
+  
+  fig <- add_trace(fig,
+                   data       = df_i,
+                   x          = ~month,
+                   y          = ~pct_vac,
+                   type       = "scatter",
+                   mode       = "lines+markers",
+                   name       = paste0("CD ", cd_i),
+                   line       = list(color = col_i, width = 1.2),
+                   marker     = list(color = col_i, size  = 4),
+                   opacity    = 1,
+                   showlegend = FALSE,
+                   text       = ~paste0(
+                     "<b>CD ", new_cd, "</b> (", boro, ")<br>",
+                     month, "<br>",
+                     "Vacancy Rate: <b>", round(pct_vac, 2), "%</b><br>",
+                     "Vacant Units: ", format(vacancies, big.mark = ","), "<br>",
+                     "Max monthly change: ", round(max_change, 1), "pp"
+                   ),
+                   hoverinfo = "text"
+  )
 }
 
+fig |>
+  layout(
+    title = list(
+      text = "<b>Vacancy Rate by Council District (Feb 2025 – Feb 2026)</b>",
+      font = list(size = 13, family = "sans-serif"),
+      x    = 0
+    ),
+    xaxis = list(
+      title         = "",
+      tickangle     = -45,
+      categoryorder = "array",
+      categoryarray = levels(cd_plot_df$month)
+    ),
+    yaxis  = list(title = "Vacancy Rate (%)", ticksuffix = "%"),
+    font   = list(family = "sans-serif", size = 12),
+    margin = list(t = 50, b = 120, l = 60, r = 20),
+    updatemenus = list(list(
+      type        = "buttons",
+      direction   = "left",
+      x           = 0, xanchor = "left",
+      y           = -0.22, yanchor = "top",
+      bgcolor     = "#f8f9fa",
+      bordercolor = "#dee2e6",
+      font        = list(size = 12),
+      buttons     = list(
+        list(
+          method = "restyle",
+          args   = list(list(
+            opacity        = all_opacities,
+            "line.color"   = all_colors,
+            "marker.color" = all_colors
+          )),
+          label  = "All CDs"
+        ),
+        list(
+          method = "restyle",
+          args   = list(list(
+            opacity        = dim_opacities,
+            "line.color"   = dim_colors,
+            "marker.color" = dim_colors
+          )),
+          label  = "Notable Only (≥3pp change)"
+        )
+      )
+    ))
+  ) |>
+  config(displayModeBar = FALSE)
+
+# notable devs
+if (length(notable_devs) > 0) {
+  p <- mod_df |>
+    filter(Dev_Name %in% notable_devs) |>
+    mutate(
+      dev_label = str_to_title(Dev_Name),
+      tooltip   = paste0(
+        "<b>", str_to_title(Dev_Name), "</b><br>",
+        month, "<br>",
+        "Vacancy Rate: <b>", round(pct_vacancies, 2), "%</b><br>",
+        "Vacant: ", Vacancies, " of ", format(total, big.mark = ","), " units"
+      )
+    ) |>
+    ggplot(aes(
+      x = month, y = pct_vacancies,
+      group = Dev_Name, text = tooltip
+    )) +
+    geom_line(color = "#2F56A6", linewidth = 0.9) +
+    geom_point(color = "#2F56A6", size = 2.5) +
+    facet_wrap(~ dev_label, scales = "free_y") +
+    scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+    labs(x = NULL, y = "Vacancy Rate (%)") +
+    theme_minimal(base_size = 11) +
+    theme(
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 8),
+      strip.text       = element_text(face = "bold", size = 8),
+      panel.grid.minor = element_blank()
+    )
+  
+  ggplotly(p, tooltip = "text") |>
+    layout(showlegend = FALSE,
+           margin     = list(t = 20, b = 80)) |>
+    config(displayModeBar = FALSE)
+} else {
+  cat("No developments met the threshold in this data period.")
+}

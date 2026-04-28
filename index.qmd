@@ -1,0 +1,550 @@
+---
+format: html
+title: "Vacancies in NYCHA Properties"
+title-block-banner-color: "#FFFFFF"
+title-block-banner: nycha-2.jpg
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(tidyr)
+library(stringr)
+
+# --- Load data ---
+connor_df <- read.csv("data/input/modified/Vacancy Data.csv")
+raw_df    <- read.csv("data/output/all_dev_data_(pulled_2026-04-07).csv")
+
+# Join BORO, CD, PACT metadata from wide input file
+df <- raw_df |>
+  left_join(
+    connor_df |> select(X, X.2, X.5, X.6),
+    by = c("Dev_Name" = "X.2")
+  ) |>
+  rename(
+    pact        = X,
+    boro        = X.5,
+    cd          = X.6,
+    month       = Month...Year,
+    move_in     = Move.In.Selected,
+    nondwelling = Non.Dwelling
+  ) |>
+  mutate(
+    pact = case_when(is.na(pact) | pact == "" ~ "N", TRUE ~ "Y"),
+    boro = ifelse(Dev_Name == "All", "ALL", boro),
+    cd   = ifelse(Dev_Name == "All", "ALL", cd),
+    pact = ifelse(Dev_Name == "All", "ALL", pact)
+  )
+
+# Chronological month factor
+month_levels <- unique(df$month)
+month_levels <- month_levels[order(as.Date(paste0("01-", month_levels), format = "%d-%b-%Y"))]
+df$month <- factor(df$month, levels = month_levels)
+
+# Per-development per-month totals and percentages
+mod_df <- df |>
+  left_join(
+    df |>
+      group_by(Dev_Name, month) |>
+      summarise(total = sum(Occupied, move_in, nondwelling, Vacancies), .groups = "drop"),
+    by = c("Dev_Name", "month")
+  ) |>
+  mutate(
+    pct_occupied    = Occupied    / total * 100,
+    pct_move_in     = move_in     / total * 100,
+    pct_nondwelling = nondwelling / total * 100,
+    pct_vacancies   = Vacancies   / total * 100
+  )
+
+# Borough aggregation (exclude unmatched rows)
+boro_df <- mod_df |>
+  filter(!is.na(boro), boro != "") |>
+  group_by(boro, month) |>
+  summarise(
+    units       = sum(total),
+    vacancies   = sum(Vacancies),
+    nondwelling = sum(nondwelling),
+    pct_vac     = vacancies   / units * 100,
+    pct_nd      = nondwelling / units * 100,
+    .groups     = "drop"
+  )
+
+# Council district aggregation (split multi-CD developments)
+cd_base <- mod_df |> filter(!is.na(cd), cd != "", cd != "ALL")
+
+cd_mod_df <- cd_base |>
+  rowwise() |>
+  mutate(new_cd = str_remove(strsplit(cd, ", ")[[1]][1], "^0+")) |>
+  ungroup() |>
+  bind_rows(
+    cd_base |>
+      filter(sapply(cd, function(x) length(strsplit(x, ", ")[[1]]) >= 2)) |>
+      rowwise() |>
+      mutate(new_cd = str_remove(strsplit(cd, ", ")[[1]][2], "^0+")) |>
+      ungroup()
+  ) |>
+  bind_rows(
+    cd_base |>
+      filter(sapply(cd, function(x) length(strsplit(x, ", ")[[1]]) >= 3)) |>
+      rowwise() |>
+      mutate(new_cd = strsplit(cd, ", ")[[1]][3]) |>
+      ungroup()
+  )
+
+cd_df <- cd_mod_df |>
+  group_by(new_cd, month) |>
+  summarise(
+    units       = sum(total),
+    vacancies   = sum(Vacancies),
+    nondwelling = sum(nondwelling),
+    pct_vac     = vacancies / units * 100,
+    boro        = first(boro),
+    .groups     = "drop"
+  ) |>
+  filter(!is.na(new_cd), new_cd != "")
+
+# Notable developments: >=3pp vacancy increase in a single month, >=100 units
+diff_df <- mod_df |>
+  filter(!is.na(boro), boro != "", boro != "ALL", Dev_Name != "All") |>
+  group_by(Dev_Name) |>
+  arrange(month, .by_group = TRUE) |>
+  mutate(vac_diff = pct_vacancies - lag(pct_vacancies)) |>
+  ungroup()
+
+notable_devs <- diff_df |>
+  filter(vac_diff >= 3, total >= 100) |>
+  distinct(Dev_Name) |>
+  pull(Dev_Name)
+
+# Shared color palette (colorblind-friendly)
+boro_colors <- c(
+  "ALL"           = "#6c757d",
+  "BRONX"         = "#3A0CA3",
+  "BROOKLYN"      = "#4361EE",
+  "MANHATTAN"     = "#F72585",
+  "QUEENS"        = "#2D6A4F",
+  "STATEN ISLAND" = "#F4A261"
+)
+
+# Shared plotly layout helper
+plotly_theme <- function(p) {
+  p |>
+    layout(
+      font   = list(family = "sans-serif", size = 12),
+      margin = list(t = 40, b = 80, l = 60, r = 20),
+      legend = list(orientation = "h", x = 0, y = -0.2,
+                    bgcolor = "rgba(255,255,255,0.8)")
+    ) |>
+    config(displayModeBar = FALSE)
+}
+```
+
+:::::::::::::::::::: grid
+::: {.g-col-12 .g-col-md-8}
+# Examining the Causes
+On January 31, 2023, the Committee on Public Housing, chaired by Council Member Alexa Avilés, held an oversight hearing entitled ["Oversight – Examining Causes of Vacancies In New York City Housing Authority Properties"](https://legistar.council.nyc.gov/MeetingDetail.aspx?ID=1075729&GUID=5CFEE992-007B-4AC7-BD8D-BCADBEF26A08&Options=info|&Search=).
+
+The Committee heard testimony from NYCHA officials regarding the increase in vacancies across NYCHA properties, the underlying reasons for why more apartments are empty for longer, and what NYCHA is currently doing to bring down vacancies.
+
+The Committee also invited NYCHA tenants, resident associations, and advocacy groups to testify on the impact of vacancies on residents of NYCHA living in buildings with vacant apartments, current tenants waiting for transfers, and persons on the waitlist.
+
+# Background on NYCHA and Public Housing
+Former New York City Mayor Fiorello La Guardia created NYCHA in 1934 to [replace dilapidated tenements using funds from The New Deal](https://www.nytimes.com/interactive/2018/06/25/nyregion/new-york-city-public-housing-history.html), three years before the [Housing Act of 1937 established public housing nationwide](https://www.gpo.gov/fdsys/pkg/USCODE-2009-title42/pdf/USCODE-2009-title42-chap8.pdf).
+
+NYCHA originally served two purposes: (1) to provide low-cost housing for middle-class, working families temporarily unemployed because of the Great Depression and (2) to bolster the lagging economy by creating jobs for the building trades. Later, NYCHA's purpose evolved into providing safe, decent housing for families with the lowest incomes.
+
+Today, NYCHA has 335 developments and 177,569 units home to 525,686 authorized residents, through the conventional public housing program and the Housing Choice Voucher program created by the United States Housing and Community Development Act of 1978 ("Section 8").
+
+:::
+
+::::: {.g-col-12 .g-col-md-4}
+:::: {style="text-align: center;"}
+::: {.callout-note style="border-left: solid 1px #dee2e6 !important;" appearance="minimal" icon="false"}
+[{{< fa building size=2x >}}]{style="color:#2F56A6;"}
+
+**6,134 Vacant Units**
+
+As of February 2026
+
+------------------------------------------------------------------------
+
+[{{< fa chart-line size=2x >}}]{style="color:#2F56A6;"}
+
+**4.20% Vacancy Rate**
+
+February 2026
+
+------------------------------------------------------------------------
+
+[{{< fa arrow-trend-up size=2x >}}]{style="color:#2F56A6;"}
+
+**6,358 Peak Vacancies**
+
+September 2025
+
+------------------------------------------------------------------------
+
+[{{< fa calendar size=2x >}}]{style="color:#2F56A6;"}
+
+**+427 Vacancies (+7.5%)**
+
+Year-over-year (Feb 2025 → Feb 2026)
+:::
+
+[Data Team Home](https://council.nyc.gov/data/){.btn .btn-block .btn-secondary .bi-house-fill role="button"}
+
+[Hearing Info](https://legistar.council.nyc.gov/MeetingDetail.aspx?ID=1075729&GUID=5CFEE992-007B-4AC7-BD8D-BCADBEF26A08&Options=info%7C&Search=){.btn .btn-block .btn-secondary .bi-info-circle-fill role="button"}
+::::
+:::::
+
+
+::: g-col-12
+## Historical Vacancies in NYCHA
+:::
+
+::: {.g-col-12 style="width: 100%"}
+The need for housing in New York City is ever present. The intense and unending demand for a NYCHA apartment makes it imperative that NYCHA quickly and efficiently place prospective tenants into vacant apartments. This has the dual result of housing a family in need and returning the apartment to the rent rolls. As NYCHA deals with an ongoing funding crisis, the need to keep vacancies as low as possible is vital.
+
+In the past NYCHA maintained over 99% occupancy for most of the last two decades, but in recent years the rate has declined sharply. In 2022, the vacancy rate reached 97.53% occupancy — while that percentage seems modest, by NYCHA's own accounting the number of actual vacant apartments went from less than 500 in November 2021 to more than 3,000 in December 2022. The trend has continued: as of February 2026, there are **6,134 vacant units** across NYCHA properties, representing a **4.20% vacancy rate**.
+:::
+
+::: g-col-12
+```{r all-vacancies}
+#| fig-height: 5
+
+all_df <- mod_df |>
+  filter(Dev_Name == "All") |>
+  select(month, Vacancies, move_in, nondwelling) |>
+  pivot_longer(
+    cols      = c(Vacancies, move_in, nondwelling),
+    names_to  = "category",
+    values_to = "units"
+  ) |>
+  mutate(
+    category = recode(category,
+      Vacancies   = "Vacant",
+      move_in     = "Move-In / Selected",
+      nondwelling = "Non-Dwelling"
+    ),
+    category = factor(category,
+      levels = c("Vacant", "Move-In / Selected", "Non-Dwelling")
+    ),
+    tooltip = paste0(
+      "<b>", category, "</b><br>",
+      month, "<br>",
+      "Units: <b>", format(units, big.mark = ","), "</b>"
+    )
+  )
+
+cat_colors <- c(
+  "Vacant"             = "#2F56A6",
+  "Move-In / Selected" = "#F4A261",
+  "Non-Dwelling"       = "#6c757d"
+)
+
+p <- ggplot(all_df, aes(
+    x = month, y = units,
+    color = category, group = category,
+    text = tooltip
+  )) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  scale_color_manual(name = NULL, values = cat_colors) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = NULL, y = "Units",
+       title = "Vacancy Trends (Feb 2025 – Feb 2026)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(face = "bold", size = 13),
+    legend.position  = "bottom"
+  )
+
+ggplotly(p, tooltip = "text") |> plotly_theme()
+```
+:::
+
+::: g-col-12
+## Recent Vacancy Trends (Feb 2025 – Feb 2026)
+:::
+::: {.g-col-12 style="width: 100%"}
+NYCHA provides data on unoccupied apartments broken into three categories: [vacant, move-in/selected, and non-dwelling](https://eapps.nycha.info/NychaMetrics/Charts/PublicHousingChartsTabs/?section=public_housing&tab=tab_repairs).
+
+Over the 13 months covered by this data (February 2025 through February 2026), total vacancies rose from **5,707** to **6,134**, peaking at **6,358** in September 2025. Non-dwelling units — apartments taken offline for administrative or maintenance reasons — also grew substantially, from 2,804 in February 2025 to 3,662 by February 2026.
+
+The chart below shows vacancy rates broken down by borough. The Bronx and Brooklyn consistently account for the largest shares of vacancies due to the concentration of large NYCHA developments in those boroughs. Hover over any point for details.
+:::
+
+::: g-col-12
+```{r boro-vacancy}
+#| fig-height: 5
+
+p <- boro_df |>
+  filter(boro != "ALL") |>
+  mutate(tooltip = paste0(
+    "<b>", boro, "</b><br>",
+    month, "<br>",
+    "Vacancy Rate: <b>", round(pct_vac, 2), "%</b><br>",
+    "Vacant Units: ", format(vacancies, big.mark = ",")
+  )) |>
+  ggplot(aes(
+    x = month, y = pct_vac,
+    color = boro, group = boro,
+    text = tooltip
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.5) +
+  scale_color_manual(name = "Borough", values = boro_colors) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, NA)) +
+  labs(x = NULL, y = "Vacancy Rate (%)",
+       title = "Vacancy Rate by Borough (Feb 2025 – Feb 2026)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(face = "bold", size = 13),
+    legend.position  = "bottom"
+  )
+
+ggplotly(p, tooltip = "text") |> plotly_theme()
+```
+:::
+
+::: g-col-12
+## Non-Dwelling Units by Borough
+:::
+::: {.g-col-12 style="width: 100%"}
+Non-dwelling units represent apartments taken out of the rental pool for maintenance, lead abatement relocations, or other administrative reasons. Growth in non-dwelling units compounds the vacancy problem, reducing available housing stock beyond what is captured by the vacancy rate alone.
+:::
+::: g-col-12
+```{r boro-nondwelling}
+#| fig-height: 5
+
+nd_plot_df <- boro_df |>
+  mutate(
+    label   = ifelse(boro == "ALL", "All City", boro),
+    tooltip = paste0(
+      "<b>", ifelse(boro == "ALL", "All City", boro), "</b><br>",
+      month, "<br>",
+      "Non-Dwelling Rate: <b>", round(pct_nd, 2), "%</b><br>",
+      "Non-Dwelling Units: ", format(nondwelling, big.mark = ",")
+    )
+  )
+
+p <- nd_plot_df |>
+  ggplot(aes(
+    x = month, y = pct_nd,
+    color = boro, group = boro,
+    linetype = boro,
+    text = tooltip
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.5) +
+  scale_color_manual(
+    name   = "Borough",
+    values = boro_colors,
+    labels = c(ALL = "All City", BRONX = "Bronx", BROOKLYN = "Brooklyn",
+               MANHATTAN = "Manhattan", QUEENS = "Queens",
+               `STATEN ISLAND` = "Staten Island")
+  ) +
+  scale_linetype_manual(
+    values = c(ALL = "dashed", BRONX = "solid", BROOKLYN = "solid",
+               MANHATTAN = "solid", QUEENS = "solid", `STATEN ISLAND` = "solid"),
+    guide  = "none"
+  ) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), limits = c(0, NA)) +
+  labs(x = NULL, y = "Non-Dwelling Rate (%)",
+       title = "Non-Dwelling Units by Borough (Feb 2025 – Feb 2026)") +
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.text.x      = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank(),
+    plot.title       = element_text(face = "bold", size = 13),
+    legend.position  = "bottom"
+  )
+
+ggplotly(p, tooltip = "text") |> plotly_theme()
+```
+:::
+
+::: g-col-12
+## Vacancy Trends by Council District
+:::
+::: {.g-col-12 style="width: 100%"}
+Vacancy rates vary significantly across council districts. Districts with large, aging NYCHA developments or those undergoing infrastructure repairs tend to show higher vacancy concentrations. The chart below shows vacancy percentages for all council districts with NYCHA properties over the data period. Hover over any line to identify the council district.
+:::
+::: g-col-12
+```{r cd-vacancy}
+#| fig-height: 6
+
+boros_keep <- c("BRONX","BROOKLYN","MANHATTAN","QUEENS","STATEN ISLAND")
+
+# Notable = any consecutive month-to-month change >= 3pp
+cd_change <- cd_df |>
+  filter(boro %in% boros_keep) |>
+  group_by(new_cd) |>
+  arrange(month) |>
+  summarise(max_change = max(abs(diff(pct_vac)), na.rm = TRUE), .groups = "drop")
+
+notable_cds <- cd_change |> filter(max_change >= 3) |> pull(new_cd)
+
+cd_plot_df <- cd_df |>
+  filter(boro %in% boros_keep) |>
+  left_join(cd_change, by = "new_cd") |>
+  mutate(notable = new_cd %in% notable_cds)
+
+cd_list <- cd_plot_df |>
+  distinct(new_cd, boro, notable, max_change) |>
+  arrange(boro, new_cd)
+
+# Precompute per-trace color vectors for both button states
+boro_col_per_trace <- unname(boro_colors[cd_list$boro])
+
+all_colors     <- as.list(boro_col_per_trace)
+all_opacities  <- as.list(rep(1, nrow(cd_list)))
+
+dim_colors     <- as.list(ifelse(cd_list$notable, boro_col_per_trace, "#cccccc"))
+dim_opacities  <- as.list(ifelse(cd_list$notable, 1, 0.1))
+
+fig <- plot_ly()
+
+for (i in seq_len(nrow(cd_list))) {
+  cd_i  <- cd_list$new_cd[i]
+  col_i <- boro_col_per_trace[i]
+  df_i  <- cd_plot_df |> filter(new_cd == cd_i) |> arrange(month)
+
+  fig <- add_trace(fig,
+    data       = df_i,
+    x          = ~month,
+    y          = ~pct_vac,
+    type       = "scatter",
+    mode       = "lines+markers",
+    name       = paste0("CD ", cd_i),
+    line       = list(color = col_i, width = 1.2),
+    marker     = list(color = col_i, size  = 4),
+    opacity    = 1,
+    showlegend = FALSE,
+    text       = ~paste0(
+      "<b>CD ", new_cd, "</b> (", boro, ")<br>",
+      month, "<br>",
+      "Vacancy Rate: <b>", round(pct_vac, 2), "%</b><br>",
+      "Vacant Units: ", format(vacancies, big.mark = ","), "<br>",
+      "Max monthly change: ", round(max_change, 1), "pp"
+    ),
+    hoverinfo = "text"
+  )
+}
+
+fig |>
+  layout(
+    title = list(
+      text = "<b>Vacancy Rate by Council District (Feb 2025 – Feb 2026)</b>",
+      font = list(size = 13, family = "sans-serif"),
+      x    = 0
+    ),
+    xaxis = list(
+      title         = "",
+      tickangle     = -45,
+      categoryorder = "array",
+      categoryarray = levels(cd_plot_df$month)
+    ),
+    yaxis  = list(title = "Vacancy Rate (%)", ticksuffix = "%"),
+    font   = list(family = "sans-serif", size = 12),
+    margin = list(t = 50, b = 120, l = 60, r = 20),
+    updatemenus = list(list(
+      type        = "buttons",
+      direction   = "left",
+      x           = 0, xanchor = "left",
+      y           = -0.22, yanchor = "top",
+      bgcolor     = "#f8f9fa",
+      bordercolor = "#dee2e6",
+      font        = list(size = 12),
+      buttons     = list(
+        list(
+          method = "restyle",
+          args   = list(list(
+            opacity        = all_opacities,
+            "line.color"   = all_colors,
+            "marker.color" = all_colors
+          )),
+          label  = "All CDs"
+        ),
+        list(
+          method = "restyle",
+          args   = list(list(
+            opacity        = dim_opacities,
+            "line.color"   = dim_colors,
+            "marker.color" = dim_colors
+          )),
+          label  = "Notable Only (≥3pp change)"
+        )
+      )
+    ))
+  ) |>
+  config(displayModeBar = FALSE)
+```
+:::
+
+::: g-col-12
+## Developments with Notable Vacancy Increases
+:::
+::: {.g-col-12 style="width: 100%"}
+The following developments saw vacancy increases of 3 percentage points or more in a single month during the data period and have 100 or more total units. These developments warrant closer attention from the Committee.
+:::
+::: g-col-12
+```{r notable-devs}
+#| fig-height: 6
+
+if (length(notable_devs) > 0) {
+  p <- mod_df |>
+    filter(Dev_Name %in% notable_devs) |>
+    mutate(
+      dev_label = str_to_title(Dev_Name),
+      tooltip   = paste0(
+        "<b>", str_to_title(Dev_Name), "</b><br>",
+        month, "<br>",
+        "Vacancy Rate: <b>", round(pct_vacancies, 2), "%</b><br>",
+        "Vacant: ", Vacancies, " of ", format(total, big.mark = ","), " units"
+      )
+    ) |>
+    ggplot(aes(
+      x = month, y = pct_vacancies,
+      group = Dev_Name, text = tooltip
+    )) +
+    geom_line(color = "#2F56A6", linewidth = 0.9) +
+    geom_point(color = "#2F56A6", size = 2.5) +
+    facet_wrap(~ dev_label, scales = "free_y") +
+    scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+    labs(x = NULL, y = "Vacancy Rate (%)") +
+    theme_minimal(base_size = 11) +
+    theme(
+      axis.text.x      = element_text(angle = 45, hjust = 1, size = 8),
+      strip.text       = element_text(face = "bold", size = 8),
+      panel.grid.minor = element_blank()
+    )
+
+  ggplotly(p, tooltip = "text") |>
+    layout(showlegend = FALSE,
+           margin     = list(t = 20, b = 80)) |>
+    config(displayModeBar = FALSE)
+} else {
+  cat("No developments met the threshold in this data period.")
+}
+```
+:::
+
+::: g-col-12
+## RAD/PACT Program
+
+::: {.callout-note}
+**Pending PACT analysis.** Updated data on developments in the Permanent Affordability Commitment Together (PACT) / Rental Assistance Demonstration (RAD) pipeline is not yet available. Analysis comparing vacancy trends between PACT and non-PACT developments will be added once data is obtained.
+:::
+:::
+
+::::::::::::::::::::
