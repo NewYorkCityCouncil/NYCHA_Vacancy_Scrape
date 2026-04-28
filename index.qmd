@@ -195,11 +195,11 @@ September 2025
 
 Year-over-year (Feb 2025 → Feb 2026)
 :::
-[Contribute on GitHub](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape){.btn .btn-block .btn-secondary .bi-github role="button"}
+[ Contribute on GitHub](https://github.com/NewYorkCityCouncil/NYCHA_Vacancy_Scrape){.btn .btn-block .btn-secondary .bi-github role="button"}
 
-[Data Team Home](https://council.nyc.gov/data/){.btn .btn-block .btn-secondary .bi-house-fill role="button"}
+[ Data Team Home](https://council.nyc.gov/data/){.btn .btn-block .btn-secondary .bi-house-fill role="button"}
 
-[Hearing Info](https://legistar.council.nyc.gov/MeetingDetail.aspx?ID=1075729&GUID=5CFEE992-007B-4AC7-BD8D-BCADBEF26A08&Options=info%7C&Search=){.btn .btn-block .btn-secondary .bi-info-circle-fill role="button"}
+[ Hearing Info](https://legistar.council.nyc.gov/MeetingDetail.aspx?ID=1075729&GUID=5CFEE992-007B-4AC7-BD8D-BCADBEF26A08&Options=info%7C&Search=){.btn .btn-block .btn-secondary .bi-info-circle-fill role="button"}
 ::::
 :::::
 
