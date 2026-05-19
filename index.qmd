@@ -552,3 +552,8 @@ if (length(notable_devs) > 0) {
 :::
 
 ::::::::::::::::::::
+
+<hr>
+For feedback, comments, and questions please email [**Data@council.nyc.gov**](mailto:data@council.nyc.gov).
+
+Created by the [**NYC Council Data Team**](https://council.nyc.gov/data/)
